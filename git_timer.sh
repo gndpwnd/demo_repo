@@ -138,64 +138,62 @@ gcmm() {
         exit 1
     fi
 
-    # Check if the current branch exists (target branch)
-    if ! git show-ref --quiet refs/heads/"$current_branch"; then
-        echo "❌ Current branch '$current_branch' does not exist."
-        exit 1
-    fi
-
     # Get the total timestamp from the source branch (to be merged)
-    source_branch_commit_time=$(git log origin/"$source_branch" --pretty=format:"%ad %s %d" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}")
-    if [ -z "$source_branch_commit_time" ]; then
-        echo "❌ No Total timestamp found for source branch '$source_branch'."
-        exit 1
-    fi
-
-    # Convert the source branch timestamp to seconds
-    source_seconds=$(convert_to_seconds "$source_branch_commit_time")
-
+    source_branch_commit_time=$(git log "$source_branch" --pretty=format:"%s" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
+    
     # Get the total timestamp from the current branch (target branch)
-    current_branch_commit_time=$(git log origin/"$current_branch" --pretty=format:"%ad %s %d" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}")
-    if [ -z "$current_branch_commit_time" ]; then
-        echo "❌ No Total timestamp found for current branch '$current_branch'."
-        exit 1
-    fi
-
-    # Convert the current branch timestamp to seconds
+    current_branch_commit_time=$(git log "$current_branch" --pretty=format:"%s" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
+    
+    # Convert the timestamps to seconds
+    source_seconds=$(convert_to_seconds "$source_branch_commit_time")
     current_seconds=$(convert_to_seconds "$current_branch_commit_time")
-
-    # Calculate the duration from the latest commit on the source branch to the current time
-    now=$(date +%s)
-    source_duration=$((now - source_seconds))
-
-    # Add the source duration to the current branch's total
-    total_seconds=$((current_seconds + source_duration))
-
-    # Format the times
-    formatted_source_duration=$(format_time $source_duration)
+    
+    # Calculate the combined total time (source + current)
+    # If both are zero, use the data from the time tracking file
+    if [ "$source_seconds" -eq 0 ] && [ "$current_seconds" -eq 0 ]; then
+        read today_total total < <(get_today_and_total_seconds)
+        total_seconds=$total
+        # If still zero, default to current branch time
+        if [ "$total_seconds" -eq 0 ]; then
+            total_seconds=$current_seconds
+        fi
+    else
+        total_seconds=$((source_seconds + current_seconds))
+    fi
+    
+    # Final safeguard: if total is still zero, use at least the current branch time
+    if [ "$total_seconds" -eq 0 ]; then
+        total_seconds=$current_seconds
+    fi
+    
+    # Format the times for the commit message
+    formatted_source_time=$(format_time $source_seconds)
     formatted_current_time=$(format_time $current_seconds)
     formatted_total_time=$(format_time $total_seconds)
-
-    # Merge commit message reflecting both the source and target branches
-    full_message="🔀 Merging branch '$source_branch' into '$current_branch'... Commit ($formatted_source_duration), Current ($formatted_current_time), Total ($formatted_total_time)"
-
+    
+    # Create the merge commit message
+    merge_message="🔀 Merging branch '$source_branch' into '$current_branch' - Source ($formatted_source_time), Current ($formatted_current_time), Total ($formatted_total_time)"
+    
     echo "📝 Merging with message:"
-    echo "\"$full_message\""
-
-    # If there is no merge conflict, proceed with the merge commit
-    if ! git diff --exit-code > /dev/null; then
-        git commit -m "$full_message"
-    fi
-
-    # Optionally push the changes to the remote
-    branch=$(git rev-parse --abbrev-ref HEAD)
-
+    echo "\"$merge_message\""
+    
+    # Perform the actual merge with the custom message
+    git merge "$source_branch" --no-ff -m "$merge_message"
+    
+    # Log the merge duration in our time tracking
+    now=$(date +%s)
+    last_time=$(cat "$TMP_LAST")
+    diff=$((now - last_time))
+    echo "$now" > "$TMP_LAST"
+    log_duration "$diff"
+    
+    # Push changes
     if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-        echo "🚀 Pushing to upstream: $branch"
+        echo "🚀 Pushing to upstream: $current_branch"
         git push
     else
-        echo "🚧 No upstream for '$branch'. Setting upstream and pushing..."
-        git push --set-upstream origin "$branch"
+        echo "🚧 No upstream for '$current_branch'. Setting upstream and pushing..."
+        git push --set-upstream origin "$current_branch"
     fi
 }
 
