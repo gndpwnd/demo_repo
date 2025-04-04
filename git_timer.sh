@@ -174,26 +174,53 @@ gcmm() {
     # Create the merge commit message
     merge_message="🔀 Merging branch '$source_branch' into '$current_branch' - Source ($formatted_source_time), Current ($formatted_current_time), Total ($formatted_total_time)"
     
-    echo "📝 Merging with message:"
+    echo "📝 Attempting to merge with message:"
     echo "\"$merge_message\""
     
-    # Perform the actual merge with the custom message
-    git merge "$source_branch" --no-ff -m "$merge_message"
+    # Store the merge message in a temporary file for later use
+    echo "$merge_message" > /tmp/git_timer_merge_msg
     
-    # Log the merge duration in our time tracking
-    now=$(date +%s)
-    last_time=$(cat "$TMP_LAST")
-    diff=$((now - last_time))
-    echo "$now" > "$TMP_LAST"
-    log_duration "$diff"
-    
-    # Push changes
-    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-        echo "🚀 Pushing to upstream: $current_branch"
-        git push
+    # Try to perform the merge
+    if git merge "$source_branch" --no-ff -m "$merge_message"; then
+        echo "✅ Merge successful!"
+        
+        # Log the merge duration in our time tracking
+        now=$(date +%s)
+        last_time=$(cat "$TMP_LAST")
+        diff=$((now - last_time))
+        echo "$now" > "$TMP_LAST"
+        log_duration "$diff"
+        
+        # Push changes
+        if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+            echo "🚀 Pushing to upstream: $current_branch"
+            git push
+        else
+            echo "🚧 No upstream for '$current_branch'. Setting upstream and pushing..."
+            git push --set-upstream origin "$current_branch"
+        fi
     else
-        echo "🚧 No upstream for '$current_branch'. Setting upstream and pushing..."
-        git push --set-upstream origin "$current_branch"
+        echo "⚠️ Merge conflict detected!"
+        echo "Please follow these steps to resolve the conflicts:"
+        echo ""
+        echo "1. Edit the files with conflicts to resolve them"
+        echo "   (Look for the <<<<<<<<, =======, and >>>>>>>> markers)"
+        echo ""
+        echo "2. Once resolved, run these commands:"
+        echo ""
+        echo "   git add ."
+        echo "   git commit -F /tmp/git_timer_merge_msg"
+        echo "   git push"
+        echo ""
+        echo "🔍 You can always view the saved merge message with:"
+        echo "   cat /tmp/git_timer_merge_msg"
+        
+        # Still update the timer for this work
+        now=$(date +%s)
+        last_time=$(cat "$TMP_LAST")
+        diff=$((now - last_time))
+        echo "$now" > "$TMP_LAST"
+        log_duration "$diff"
     fi
 }
 
