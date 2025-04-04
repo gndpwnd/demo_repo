@@ -106,8 +106,24 @@ commit_with_time() {
 # Convert time in HH:MM:SS format to total seconds
 convert_to_seconds() {
     time_str=$1
-    IFS=':' read -r hours minutes seconds <<< "$time_str"
-    echo $((hours * 3600 + minutes * 60 + seconds))
+    if [[ $time_str =~ ([0-9]+):([0-9]+):([0-9]+) ]]; then
+        hours=${BASH_REMATCH[1]}
+        minutes=${BASH_REMATCH[2]}
+        seconds=${BASH_REMATCH[3]}
+        # Remove leading zeros to avoid base interpretation issues
+        hours=${hours#0}
+        minutes=${minutes#0}
+        seconds=${seconds#0}
+        # Handle empty strings (when value was just "0")
+        [[ -z "$hours" ]] && hours=0
+        [[ -z "$minutes" ]] && minutes=0
+        [[ -z "$seconds" ]] && seconds=0
+        
+        total=$((10#$hours * 3600 + 10#$minutes * 60 + 10#$seconds))
+        echo "$total"
+    else
+        echo "0"
+    fi
 }
 
 # Convert seconds back to HH:MM:SS format
@@ -139,31 +155,31 @@ gcmm() {
     fi
 
     # Get the total timestamp from the source branch (to be merged)
-    source_branch_commit_time=$(git log "$source_branch" --pretty=format:"%s" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
+    source_branch_commit_time=$(git log "$source_branch" -n 1 --pretty=format:"%s" | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
     
     # Get the total timestamp from the current branch (target branch)
-    current_branch_commit_time=$(git log "$current_branch" --pretty=format:"%s" -n 1 | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
+    current_branch_commit_time=$(git log "$current_branch" -n 1 --pretty=format:"%s" | grep -oP "Total \(\K[0-9]{2}:[0-9]{2}:[0-9]{2}" || echo "00:00:00")
+    
+    echo "Source branch time: $source_branch_commit_time"
+    echo "Current branch time: $current_branch_commit_time"
     
     # Convert the timestamps to seconds
     source_seconds=$(convert_to_seconds "$source_branch_commit_time")
     current_seconds=$(convert_to_seconds "$current_branch_commit_time")
     
-    # Calculate the combined total time (source + current)
-    # If both are zero, use the data from the time tracking file
-    if [ "$source_seconds" -eq 0 ] && [ "$current_seconds" -eq 0 ]; then
-        read today_total total < <(get_today_and_total_seconds)
-        total_seconds=$total
-        # If still zero, default to current branch time
-        if [ "$total_seconds" -eq 0 ]; then
-            total_seconds=$current_seconds
-        fi
-    else
-        total_seconds=$((source_seconds + current_seconds))
-    fi
+    echo "Source seconds: $source_seconds"
+    echo "Current seconds: $current_seconds"
     
-    # Final safeguard: if total is still zero, use at least the current branch time
+    # Calculate the combined total time (source + current)
+    total_seconds=$((source_seconds + current_seconds))
+    
+    # If total is zero, try getting time from tracking file
     if [ "$total_seconds" -eq 0 ]; then
-        total_seconds=$current_seconds
+        read today_total total < <(get_today_and_total_seconds)
+        if [ "$total" -gt 0 ]; then
+            total_seconds=$total
+            echo "Using time from tracking file: $total_seconds seconds"
+        fi
     fi
     
     # Format the times for the commit message
@@ -201,16 +217,37 @@ gcmm() {
         fi
     else
         echo "⚠️ Merge conflict detected!"
-        echo "Please follow these steps to resolve the conflicts:"
+        
+        # Get list of files with conflicts
+        conflict_files=$(git diff --name-only --diff-filter=U)
+        echo "🔄 Files with conflicts:"
+        
+        # Get the full path for each conflicted file
+        repo_root=$(git rev-parse --show-toplevel)
+        while IFS= read -r file; do
+            full_path="${repo_root}/${file}"
+            echo "   - ${full_path}"
+        done <<< "$conflict_files"
+        
         echo ""
-        echo "1. Edit the files with conflicts to resolve them"
-        echo "   (Look for the <<<<<<<<, =======, and >>>>>>>> markers)"
+        echo "You have two options:"
         echo ""
-        echo "2. Once resolved, run these commands:"
+        echo "OPTION 1: Resolve conflicts and complete the merge"
         echo ""
-        echo "   git add ."
-        echo "   git commit -F /tmp/git_timer_merge_msg"
-        echo "   git push"
+        echo "   1. Edit the files with conflicts to resolve them"
+        echo "      (Look for the <<<<<<<<, =======, and >>>>>>>> markers)"
+        echo ""
+        echo "   2. Once resolved, run these commands:"
+        echo ""
+        echo "      git add ."
+        echo "      git commit -F /tmp/git_timer_merge_msg"
+        echo "      git push"
+        echo ""
+        echo "OPTION 2: Abort the merge and start over"
+        echo ""
+        echo "   Run this command to cancel the merge:"
+        echo ""
+        echo "      git merge --abort"
         echo ""
         echo "🔍 You can always view the saved merge message with:"
         echo "   cat /tmp/git_timer_merge_msg"
