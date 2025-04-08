@@ -150,7 +150,7 @@ gcmm() {
     echo "📝 Merging '$target_branch' into '$current_branch' with commit message:"
     echo "$full_message"
 
-    git merge "$target_branch" -m "$full_message"
+    git merge --no-ff "$target_branch" -m "$full_message"
 
     if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
         echo "🚀 Pushing to upstream: $current_branch"
