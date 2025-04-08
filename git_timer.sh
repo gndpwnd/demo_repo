@@ -166,27 +166,33 @@ gcmm() {
 print_git_times() {
     now=$(date +%s)
     session_id=$(cat "$TMP_SESSION")
-    last_sess_commit_time=0
+    start_time=$(cat "$TMP_START")
+    last_commit_time=0
+    session_duration=0
 
+    # Get time of last commit in current session
     while read -r line; do
         ts=$(echo "$line" | awk '{print $1}')
         sid=$(echo "$line" | awk '{print $3}')
         if [[ "$sid" == "$session_id" ]]; then
-            last_sess_commit_time=$ts
+            last_commit_time=$ts
+            session_duration=$((session_duration + $(echo "$line" | awk '{print $2}')))
         fi
     done < "$TMP_LOG"
 
-    if [[ "$last_sess_commit_time" -eq 0 ]]; then
-        start_time=$(cat "$TMP_START")
-        diff=$((now - start_time))
-        formatted_diff=$(format_time $diff)
-        echo "⏱️ No commits in this session yet. Time since timer started: $formatted_diff"
+    # Time since last commit or start
+    if [[ "$last_commit_time" -eq 0 ]]; then
+        time_since=$((now - start_time))
+        echo "⏱️ No commits yet. Time since timer started: $(format_time $time_since)"
     else
-        diff=$((now - last_sess_commit_time))
-        formatted_diff=$(format_time $diff)
-        echo "⏱️ Time since last commit (this session): $formatted_diff"
+        time_since=$((now - last_commit_time))
+        echo "⏱️ Time since last commit (this session): $(format_time $time_since)"
     fi
 
+    # Total time of current session
+    echo "🧭 Total time in this session:  $(format_time $session_duration)"
+
+    # Total time across all sessions (via commit messages)
     declare -A session_times
     declare -A branches
 
@@ -199,7 +205,6 @@ print_git_times() {
         sess_id=$(echo "$line" | grep -oE "SESSID: [a-f0-9]{12}" | awk '{print $2}')
         dur=$(echo "$line" | grep -oE "\([0-9]{2}:[0-9]{2}:[0-9]{2}\)" | head -1 | tr -d '()')
         dur_secs=$(convert_to_seconds "$dur")
-
         if [[ -n "$sess_id" && "$dur_secs" -gt "${session_times[$sess_id]:-0}" ]]; then
             session_times[$sess_id]=$dur_secs
         fi
@@ -210,11 +215,11 @@ print_git_times() {
         total_sum=$((total_sum + val))
     done
 
-    formatted_total=$(format_time $total_sum)
-    echo "🧩 Total across sessions:  $formatted_total"
+    echo "🧩 Total across sessions:  $(format_time $total_sum)"
     echo -n "       Branches Included: "
     echo "${!branches[@]}" | tr ' ' ','
 }
+
 
 stop_timer() {
     rm -f "$TMP_START" "$TMP_LAST" "$TMP_SESSION" "$ALIAS_FILE"
